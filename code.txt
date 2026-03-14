@@ -1,0 +1,344 @@
+`timescale 1ns / 1ps
+module fifo_memory_array (
+
+
+ input write_clk,
+ input write_reset,
+ input write_increment,
+ input [127:0] write_data,
+ output write_full,
+ output write_threshold,
+ 
+ input read_clk,
+ input read_reset,
+ input read_increment,
+ output [127:0] read_data,
+ output read_empty,
+ output read_threshold
+  );
+
+
+ wire [3:0] write_address, read_address;
+ wire [4:0] write_pointer, read_pointer, write_sync, read_sync;
+
+ write_syncronizer sync_1 (.write_sync(write_sync), .read_pointer(read_pointer), .write_clk(write_clk), .write_reset(write_reset));
+ read_syncronizer sync_2 (.read_sync(read_sync), .write_pointer(write_pointer), .read_clk(read_clk), .read_reset(read_reset));
+
+ memory_fifo m1 (.read_data(read_data), .write_data(write_data), .write_address(write_address), .read_address(read_address), .write_data_start(write_increment), .write_full(write_full), .write_clk(write_clk), .read_clk(read_clk) ,.read_empty(read_empty));
+
+ read_pointer pointer_1 (.read_threshold(read_threshold),.read_empty(read_empty), .read_address(read_address), .read_pointer(read_pointer), .read_sync(read_sync), .read_increment(read_increment), .read_clk(read_clk), .read_reset(read_reset));
+
+ write_pointer pointer_2 (.write_threshold(write_threshold),.write_full(write_full), .write_address(write_address), .write_pointer(write_pointer), .write_sync(write_sync), .write_increment(write_increment), .write_clk(write_clk), .write_reset(write_reset));
+
+endmodule
+
+module memory_fifo ( write_data_start, write_clk , write_data,write_address,write_full,read_address,read_data,read_clk,read_empty);
+    input write_data_start;
+    input write_clk, read_clk;
+    input [127:0] write_data;
+    input [3:0] write_address;
+    input write_full, read_empty;
+ 
+    input [3:0] read_address;
+    output [127:0] read_data;
+   
+    reg [127:0] read_data_temp;
+
+        reg [127:0] memory [0:15];
+       
+        always @(posedge write_clk)
+            if (write_data_start && !write_full)
+                  memory[write_address] <= write_data;
+                 
+                 
+      /* always @(posedge read_clk)
+         if (!read_empty)
+              read_data_temp = memory[read_address]; */
+                 
+        // assign read_data =read_data_temp;
+        assign read_data = memory[read_address];
+
+endmodule
+module write_syncronizer (
+  input write_reset,
+  input write_clk,
+  input [4:0] read_pointer,
+  output reg [4:0] write_sync
+ );
+ 
+ reg [4:0] write_sync_d1;
+ 
+ always @(posedge write_clk or negedge write_reset)
+    if (!write_reset)
+    begin
+        write_sync_d1 <=0;
+        write_sync <=0;
+    end    
+   
+    else
+    begin
+        write_sync_d1<=read_pointer;
+        write_sync <=write_sync_d1;
+    end
+           
+endmodule
+module read_syncronizer(
+ output reg [4:0] read_sync,
+ input [4:0] write_pointer,
+ input read_clk, read_reset);
+ 
+ reg [4:0] read_sync_d1,z1;
+
+ always @(posedge read_clk or negedge read_reset)
+    if (!read_reset)
+    begin
+    read_sync <=0 ;
+    read_sync_d1 <= 0; end
+    else
+    begin
+    read_sync_d1 <= write_pointer;
+   read_sync <=read_sync_d1;
+   end
+     
+       
+endmodule
+module read_pointer (
+ output reg read_empty,
+ output [3:0] read_address,
+ output reg [4 :0] read_pointer,
+ input [4 :0] read_sync,
+ input read_increment, read_clk, read_reset,
+ output reg read_threshold);
+ 
+ 
+ reg [4:0] read_b;
+ wire [4:0] read_g_n, read_b_n;
+ wire fifo_empty_check;
+ 
+ always @(posedge read_clk or negedge read_reset)
+    if (!read_reset)
+        {read_b, read_pointer} <= 0;
+    else
+        {read_b, read_pointer} <= {read_b_n, read_g_n};
+       
+    //reg read_threshold;  
+    always @(posedge read_clk)
+        begin
+        if (read_b == 4'd2 || read_b == 4'd14 )
+        read_threshold <= 1'b1;
+        else
+        read_threshold <= 1'b0;
+        end
+    /*always @(posedge read_clk)
+              begin
+              if (read_b == 4'd14)
+              read_threshold <= 1'b1;
+              else
+              read_threshold <= 1'b0;
+              end*/
+      wire z1,z3;
+        wire z2;
+        nand n1( z1,read_empty,read_empty);  
+        nand n2( z2,z1, read_increment);
+        nand n3( z3,z2,z2);    
+       
+ assign read_address = read_b[3:0];
+ //assign read_b_n = read_b + (read_increment & ~read_empty);
+ 
+ assign read_b_n = read_b +z3;
+ 
+ assign read_g_n = (read_b_n>>1) ^ read_b_n;
+ 
+ assign fifo_empty_check = (read_g_n == read_sync);
+ 
+ always @(posedge read_clk or negedge read_reset)
+     if (!read_reset)
+        read_empty <= 1'b1;
+    else
+        read_empty <= fifo_empty_check;
+endmodule
+
+module write_pointer ( write_full, write_address, write_pointer,
+write_sync, write_increment, write_clk, write_reset, write_threshold);  
+    input write_clk, write_reset;
+    input [4 :0] write_sync;
+    input write_increment;
+   
+    output reg write_threshold;
+    output reg write_full;
+    output [3:0] write_address;
+    output reg [4 :0] write_pointer;
+ 
+ reg [4:0] write_b;
+ wire [4:0] write_g_n, write_b_n;
+ 
+ always @(posedge write_clk or negedge write_reset)
+    if (!write_reset)
+        {write_b, write_pointer} <= 0;
+    else begin
+        write_b <= write_b_n;
+        write_pointer <= write_g_n; end
+       
+       
+  always @(*)
+    begin
+        if (write_b ==4'd2 || write_b == 4'd14) // if (read_b == 4'd2 && read_b==4'd14 )
+             write_threshold <= 1'b1;
+        else
+             write_threshold <= 1'b0;
+        end
+       
+  wire x1,x3;
+  wire x2;
+  nand n1( x1,write_full,write_full);  
+  nand n2( x2,x1, write_increment);
+  nand n3( x3,x2,x2);
+ 
+ assign write_address = write_b[3:0];
+ assign write_b_n = write_b + x3;
+ //assign write_b_n = write_b + (write_increment & ~write_full);
+ assign write_g_n = (write_b_n>>1) ^ write_b_n;
+ 
+ assign fifo_full_check = (write_g_n=={~write_sync[4:3], write_sync[2:0]});
+ 
+ always @(posedge write_clk or negedge write_reset)
+    if (!write_reset)
+        write_full <= 1'b0;
+    else
+        write_full <= fifo_full_check;
+endmodule
+
+
+module test;
+reg write_clk;
+reg write_reset;
+reg write_increment;
+reg [127:0] write_data;
+wire write_full;
+wire write_threshold;
+
+reg read_clk;
+reg read_reset;
+reg read_increment;
+wire [127:0] read_data;
+wire read_empty ;
+wire read_threshold;
+
+
+fifo_memory_array fifo(.read_data(read_data),.write_full(write_full),.read_empty(read_empty),.write_data(write_data),.write_increment(write_increment),.write_clk(write_clk),.write_reset(write_reset),.read_increment(read_increment),
+.read_clk(read_clk),.read_reset(read_reset) , .read_threshold(read_threshold) , .write_threshold(write_threshold));
+
+initial begin
+read_clk=0;
+forever #10 read_clk=~read_clk;
+end
+initial begin
+write_clk=0;
+forever #5 write_clk=~write_clk;
+end
+initial begin
+
+write_reset = 1'b0;
+read_reset = 1'b0;
+
+#10
+write_reset =1'b1;
+write_data = 8'd34;
+write_increment=1;
+#10
+write_data = 8'd35;
+write_increment=1;
+#10
+//read_reset=1'b1;
+//read_increment=1;
+//#20;
+//read_reset=1'b1;
+//read_increment=1;
+write_data = 8'd36;
+write_increment=1;
+#10
+write_data = 8'd37;
+write_increment=1;
+//read_increment=1;
+#10
+
+//read_increment=1;
+write_data = 8'd38;
+write_increment=1;
+#10
+write_data = 8'd39;
+write_increment=1;
+//read_increment=1;
+#10
+write_data = 8'd40;
+write_increment=1;
+#10
+write_data = 8'd41;
+write_increment=1;
+#10
+write_data = 8'd42;
+write_increment=1;
+#10
+
+write_data = 8'd43;
+write_increment=1;
+#10
+write_data = 8'd44;
+write_increment=1;
+#10
+write_data = 8'd45;
+write_increment=1;
+#10
+write_data = 8'd46;
+write_increment=1;
+#10
+write_data = 8'd47;
+write_increment=1;
+#10
+write_data = 8'd48;
+write_increment=1;
+#10
+write_data = 8'd49;
+//write_increment=1;
+#10
+write_increment=0;
+//write_data = 8'dx;
+
+read_reset=1'b1;
+read_increment=1;
+#20;
+
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#20
+read_increment=1;
+#100;
+$finish;
+end
+
+endmodule
